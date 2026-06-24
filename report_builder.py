@@ -3,7 +3,6 @@ from __future__ import annotations
 import re
 import zipfile
 from collections import Counter
-from datetime import datetime
 from difflib import SequenceMatcher
 from io import BytesIO
 from pathlib import PurePosixPath
@@ -11,12 +10,22 @@ from typing import Dict, Iterable, List, Optional, Tuple
 
 import pandas as pd
 
-BASE_TARGET_COLUMNS = [
-    "Rank",
+PLACEMENT_DETAIL_COLUMNS = [
+    "Record ID",
+    "Job Offer ID",
+    "Company ID",
     "Company",
-    "Total Placements",
+    "Major",
+    "Job Role",
+    "Job Title",
+    "Class Year",
+    "Functional Area",
+    "Industry",
+    "Start Date",
+    "State",
 ]
 
+BASE_TARGET_COLUMNS = ["Rank", "Company", "Total Placements"]
 POST_MAJOR_TARGET_COLUMNS = [
     "Major Mix",
     "Class Year(s)",
@@ -49,22 +58,10 @@ CONTACT_COLUMNS = [
     "Contact Match Method",
 ]
 
-PLACEMENT_DETAIL_COLUMNS = [
-    "Company",
-    "Major",
-    "Job Role",
-    "Job Title",
-    "Class of",
-    "Functional Area",
-    "Industry",
-    "Start Date",
-    "State",
-    "Student ID",
-    "Source Program",
-    "Source File",
-]
-
 COLUMN_ALIASES = {
+    "record_id": ["record id", "id", "placement id", "outcome id", "career outcomes id"],
+    "job_offer_id": ["job offer id", "offer id", "job id", "posting id", "job posting id", "handshake job id"],
+    "company_id": ["company id", "employer id", "account id", "organization id", "company.account id"],
     "company": [
         "company", "company name", "employer", "employer name", "organization", "organization name",
         "account name", "company/account", "company / account", "employer/company", "hiring company",
@@ -75,26 +72,22 @@ COLUMN_ALIASES = {
     ],
     "job_role": ["job role", "job roles", "role", "position category", "job category", "job family"],
     "job_title": ["job title", "title", "position", "offer title", "position title"],
-    "class_year": ["class of", "class year", "graduation year", "grad year", "year", "graduating class"],
+    "class_year": ["class year", "class of", "graduation year", "grad year", "year", "graduating class"],
     "functional_area": ["functional area", "function", "career function", "business function", "job function"],
     "industry": ["industry", "industry name", "sector", "employer industry", "company industry"],
     "start_date": ["start date", "job start date", "offer start date", "hire date", "employment start date", "date posted", "apply start date"],
     "state": ["state", "state/province", "region", "location state", "work state", "province", "job location"],
-    "student_id": ["student id", "student id.id", "student", "student identifier", "net id", "byu id", "studentid", "studentid.id"],
 }
 
 CONTACT_ALIASES = {
-    "company": ["company", "company name", "employer", "employer name", "employer name", "account name", "organization", "name"],
-    "handshake": [
-        "handshake", "handshake link", "handshake url", "handshake employer link",
-        "employer handshake link", "handshake profile", "handshake link old", "handshake link (old)",
-    ],
-    "website": ["website", "company website", "web site", "url", "employer website", "company website"],
+    "company": ["company", "company name", "employer", "employer name", "account name", "organization", "name"],
+    "handshake": ["handshake", "handshake link", "handshake url", "handshake employer link", "employer handshake link", "handshake profile", "handshake link old", "handshake link (old)"],
+    "website": ["website", "company website", "web site", "url", "employer website"],
     "linkedin": ["linkedin", "linkedin url", "linkedin link", "company linkedin", "linkedin profile"],
     "owner": ["owner", "account owner", "employer owner", "record owner"],
     "css": ["css", "css assigned", "assigned css", "css assigned to", "career success specialist"],
     "primary_contact": ["primary contact", "primary recruiter", "recruiter", "contact", "contact name"],
-    "main_contact": ["main contact", "main recruiter", "main point of contact", "poc", "main point of contact"],
+    "main_contact": ["main contact", "main recruiter", "main point of contact", "poc"],
     "email": ["email", "contact email", "recruiter email", "primary contact email", "main contact email"],
     "phone": ["phone", "phone number", "contact phone", "recruiter phone", "primary contact phone"],
     "engagement_status": ["engagement status", "ce engagement status", "status", "employer status", "recent contact status"],
@@ -124,61 +117,30 @@ def normalize_major(value: object) -> str:
     text = str(value or "").strip()
     if not text or text.lower() in {"nan", "none", "null"}:
         return "UNSPECIFIED"
-    # Keep compact program codes like BSFin, MAcc, MBA readable and consistent.
     text = re.sub(r"\s+", " ", text)
-    return text.upper() if len(text) <= 12 else text.strip()
+    return text.upper() if len(text) <= 12 else text
 
 
-def first_present(values: Iterable[object]) -> str:
-    for value in values:
-        if pd.notna(value) and str(value).strip():
-            return str(value).strip()
-    return ""
-
-
-def top_value(values: Iterable[object], default: str = "Unspecified") -> str:
-    cleaned = [str(v).strip() for v in values if pd.notna(v) and str(v).strip() and str(v).strip().lower() not in {"nan", "none"}]
-    if not cleaned:
-        return default
-    return Counter(cleaned).most_common(1)[0][0]
-
-
-def join_top(values: Iterable[object], limit: int = 6) -> str:
-    cleaned = [str(v).strip() for v in values if pd.notna(v) and str(v).strip() and str(v).strip().lower() not in {"nan", "none"}]
-    if not cleaned:
-        return "Unspecified"
-    ordered = [value for value, _ in Counter(cleaned).most_common(limit)]
-    return ", ".join(ordered)
-
-
-def join_unique_sorted(values: Iterable[object], limit: Optional[int] = None) -> str:
-    cleaned: List[str] = []
-    for value in values:
-        if pd.isna(value) or not str(value).strip():
-            continue
-        text = str(value).strip()
-        if text.lower() in {"nan", "none"}:
-            continue
-        if re.fullmatch(r"\d+\.0", text):
-            text = text[:-2]
-        cleaned.append(text)
-    unique = sorted(set(cleaned), key=lambda x: (not x.isdigit(), x))
-    if limit:
-        unique = unique[:limit]
-    return ", ".join(unique) if unique else "Unspecified"
+def display_value(value: object) -> str:
+    if pd.isna(value):
+        return ""
+    text = str(value).strip()
+    if text.lower() in {"nan", "none", "nat", "null"}:
+        return ""
+    if re.fullmatch(r"\d+\.0", text):
+        return text[:-2]
+    return text
 
 
 def infer_columns(df: pd.DataFrame, aliases: Dict[str, List[str]]) -> Dict[str, str]:
     normalized_lookup = {normalize_header(col): col for col in df.columns}
     result: Dict[str, str] = {}
-
     for canonical, candidates in aliases.items():
         for candidate in candidates:
             norm = normalize_header(candidate)
             if norm in normalized_lookup:
                 result[canonical] = normalized_lookup[norm]
                 break
-
     all_norms = list(normalized_lookup.keys())
     for canonical, candidates in aliases.items():
         if canonical in result:
@@ -240,7 +202,6 @@ def read_zip_placements(zip_bytes: bytes) -> Tuple[pd.DataFrame, pd.DataFrame]:
     excel_files = excel_files_from_zip(zip_bytes)
     if not excel_files:
         raise ValueError("No Excel files were found inside the uploaded ZIP.")
-
     frames = []
     manifest_rows = []
     for item in excel_files:
@@ -249,7 +210,6 @@ def read_zip_placements(zip_bytes: bytes) -> Tuple[pd.DataFrame, pd.DataFrame]:
             df = read_excel(item["bytes"], sheet)
             df["Source Program"] = item["source_program"]
             df["Source File"] = item["file_name"]
-            df["Source Path"] = item["path"]
             frames.append(df)
             manifest_rows.append({
                 "Source Program": item["source_program"],
@@ -280,7 +240,39 @@ def detect_available_majors(df: pd.DataFrame) -> List[str]:
     else:
         return []
     majors = [m for m in majors if m and m != "UNSPECIFIED"]
-    return sorted(set(majors), key=lambda x: (x.lower()))
+    return sorted(set(majors), key=str.lower)
+
+
+def top_value(values: Iterable[object], default: str = "Unspecified") -> str:
+    cleaned = [display_value(v) for v in values]
+    cleaned = [v for v in cleaned if v]
+    if not cleaned:
+        return default
+    return Counter(cleaned).most_common(1)[0][0]
+
+
+def join_top(values: Iterable[object], limit: int = 6) -> str:
+    cleaned = [display_value(v) for v in values]
+    cleaned = [v for v in cleaned if v and v != "Unspecified"]
+    if not cleaned:
+        return "Unspecified"
+    ordered = [value for value, _ in Counter(cleaned).most_common(limit)]
+    extra = len(set(cleaned)) - len(ordered)
+    text = ", ".join(ordered)
+    return text + (f" (+{extra} more)" if extra > 0 else "")
+
+
+def join_unique_sorted(values: Iterable[object], limit: Optional[int] = None) -> str:
+    cleaned = []
+    for value in values:
+        text = display_value(value)
+        if text:
+            cleaned.append(text)
+    unique = sorted(set(cleaned), key=lambda x: (not x.isdigit(), x))
+    if limit and len(unique) > limit:
+        shown = unique[:limit]
+        return ", ".join(shown) + f" (+{len(unique) - limit} more)"
+    return ", ".join(unique) if unique else "Unspecified"
 
 
 def clean_placement_data(
@@ -291,17 +283,21 @@ def clean_placement_data(
     mapping = infer_columns(df, COLUMN_ALIASES)
     missing = []
     if "company" not in mapping:
-        missing.append("company")
+        missing.append("company/employer")
     if "major" not in mapping and default_major is None and "Source Program" not in df.columns:
-        missing.append("major")
+        missing.append("major/program")
     if missing:
-        raise ValueError(
-            "Could not identify required column(s): " + ", ".join(missing) +
-            ". Make sure the upload includes company/employer and major/program fields."
-        )
+        raise ValueError("Could not identify required column(s): " + ", ".join(missing) + ".")
 
-    cleaned = pd.DataFrame()
-    cleaned["Company"] = df[mapping["company"]].apply(lambda x: "" if pd.isna(x) else str(x).strip())
+    cleaned = pd.DataFrame(index=df.index)
+    for source_key, out_col in [
+        ("record_id", "Record ID"),
+        ("job_offer_id", "Job Offer ID"),
+        ("company_id", "Company ID"),
+    ]:
+        cleaned[out_col] = df[mapping[source_key]].apply(display_value) if source_key in mapping else ""
+
+    cleaned["Company"] = df[mapping["company"]].apply(display_value)
     if "major" in mapping:
         cleaned["Major"] = df[mapping["major"]].apply(normalize_major)
     elif default_major:
@@ -309,30 +305,18 @@ def clean_placement_data(
     else:
         cleaned["Major"] = df["Source Program"].apply(normalize_major)
 
-    optional_map = {
-        "job_role": "Job Role",
-        "job_title": "Job Title",
-        "class_year": "Class of",
-        "functional_area": "Functional Area",
-        "industry": "Industry",
-        "state": "State",
-        "student_id": "Student ID",
-    }
-    for source_key, out_col in optional_map.items():
-        if source_key in mapping:
-            cleaned[out_col] = df[mapping[source_key]].apply(lambda x: "" if pd.isna(x) else str(x).strip())
-        else:
-            cleaned[out_col] = ""
+    for source_key, out_col in [
+        ("job_role", "Job Role"),
+        ("job_title", "Job Title"),
+        ("class_year", "Class Year"),
+        ("functional_area", "Functional Area"),
+        ("industry", "Industry"),
+        ("state", "State"),
+    ]:
+        cleaned[out_col] = df[mapping[source_key]].apply(display_value) if source_key in mapping else ""
 
-    if "start_date" in mapping:
-        cleaned["Start Date"] = pd.to_datetime(df[mapping["start_date"]], errors="coerce")
-    else:
-        cleaned["Start Date"] = pd.NaT
-
-    cleaned["Source Program"] = df["Source Program"].apply(lambda x: "" if pd.isna(x) else str(x).strip()) if "Source Program" in df.columns else ""
-    cleaned["Source File"] = df["Source File"].apply(lambda x: "" if pd.isna(x) else str(x).strip()) if "Source File" in df.columns else ""
-
-    cleaned = cleaned[cleaned["Company"].notna() & (cleaned["Company"].str.strip() != "")]
+    cleaned["Start Date"] = pd.to_datetime(df[mapping["start_date"]], errors="coerce") if "start_date" in mapping else pd.NaT
+    cleaned = cleaned[cleaned["Company"].astype(str).str.strip() != ""].copy()
     cleaned = cleaned[~cleaned["Company"].str.lower().isin(["nan", "none"])]
 
     if selected_majors:
@@ -340,13 +324,12 @@ def clean_placement_data(
         if selected:
             cleaned = cleaned[cleaned["Major"].isin(selected)]
 
-    for col in ["Job Role", "Job Title", "Functional Area", "Industry", "State", "Class of"]:
-        cleaned[col] = cleaned[col].replace({"nan": "", "None": "", "NaT": ""}).fillna("")
-        if col in ["Job Role", "Job Title", "Functional Area", "Industry"]:
-            cleaned[col] = cleaned[col].replace("", "Unspecified")
+    for col in ["Job Role", "Job Title", "Functional Area", "Industry", "State", "Class Year"]:
+        cleaned[col] = cleaned[col].fillna("").apply(display_value)
+    for col in ["Job Role", "Job Title", "Functional Area", "Industry"]:
+        cleaned[col] = cleaned[col].replace("", "Unspecified")
 
-    cleaned = cleaned[PLACEMENT_DETAIL_COLUMNS].copy()
-    return cleaned.reset_index(drop=True), mapping, missing
+    return cleaned[PLACEMENT_DETAIL_COLUMNS].reset_index(drop=True), mapping, missing
 
 
 def tier_thresholds(total_placements: int) -> Tuple[int, int]:
@@ -359,7 +342,10 @@ def tier_thresholds(total_placements: int) -> Tuple[int, int]:
 
 def major_columns(cleaned: pd.DataFrame) -> List[str]:
     counts = cleaned["Major"].fillna("UNSPECIFIED").value_counts()
-    return [m for m in counts.index.tolist() if m != "UNSPECIFIED"] + (["UNSPECIFIED"] if "UNSPECIFIED" in counts.index else [])
+    majors = [m for m in counts.index.tolist() if m != "UNSPECIFIED"]
+    if "UNSPECIFIED" in counts.index:
+        majors.append("UNSPECIFIED")
+    return majors
 
 
 def format_major_mix(counts: Dict[str, int]) -> str:
@@ -369,10 +355,9 @@ def format_major_mix(counts: Dict[str, int]) -> str:
     positive.sort(key=lambda x: (-x[1], x[0]))
     if len(positive) == 1:
         return f"{positive[0][0]} only"
-    top = [m for m, _ in positive[:3]]
     if len(positive) <= 3:
-        return " + ".join(top)
-    return ", ".join(top) + f" + {len(positive) - 3} more"
+        return " + ".join([m for m, _ in positive])
+    return ", ".join([m for m, _ in positive[:3]]) + f" + {len(positive) - 3} more"
 
 
 def make_company_targets(cleaned: pd.DataFrame) -> Tuple[pd.DataFrame, List[str]]:
@@ -380,7 +365,6 @@ def make_company_targets(cleaned: pd.DataFrame) -> Tuple[pd.DataFrame, List[str]
     tier1_threshold, tier2_threshold = tier_thresholds(total_placements)
     majors = major_columns(cleaned)
     rows = []
-
     for company, group in cleaned.groupby("Company", dropna=False):
         major_counts = {major: int((group["Major"] == major).sum()) for major in majors}
         total = int(len(group))
@@ -393,14 +377,13 @@ def make_company_targets(cleaned: pd.DataFrame) -> Tuple[pd.DataFrame, List[str]
         else:
             tier = "Tier 3 — Emerging employer"
             priority = "Monitor"
-
         start_dates = pd.to_datetime(group["Start Date"], errors="coerce")
-        row = {
+        rows.append({
             "Company": company,
             "Total Placements": total,
             **major_counts,
             "Major Mix": format_major_mix(major_counts),
-            "Class Year(s)": join_unique_sorted(group["Class of"]),
+            "Class Year(s)": join_unique_sorted(group["Class Year"]),
             "Primary Industry": top_value(group["Industry"]),
             "Primary Functional Area": top_value(group["Functional Area"]),
             "Job Role(s)": join_top(group["Job Role"], limit=6),
@@ -410,9 +393,7 @@ def make_company_targets(cleaned: pd.DataFrame) -> Tuple[pd.DataFrame, List[str]
             "Latest Start Date": start_dates.max() if start_dates.notna().any() else pd.NaT,
             "Employer Tier": tier,
             "Recruiting Priority": priority,
-        }
-        rows.append(row)
-
+        })
     target_columns = BASE_TARGET_COLUMNS + majors + POST_MAJOR_TARGET_COLUMNS
     targets = pd.DataFrame(rows)
     if targets.empty:
@@ -422,26 +403,52 @@ def make_company_targets(cleaned: pd.DataFrame) -> Tuple[pd.DataFrame, List[str]
     return targets[target_columns], majors
 
 
-def make_summary_tables(cleaned: pd.DataFrame, company_targets: pd.DataFrame, majors: List[str]) -> Dict[str, pd.DataFrame]:
-    def vc_frame(series: pd.Series, name: str, count_name: str = "Placements", limit: Optional[int] = None) -> pd.DataFrame:
-        vc = series.fillna("Unspecified").replace("", "Unspecified").value_counts(dropna=False)
-        if limit:
-            vc = vc.head(limit)
-        return vc.rename_axis(name).reset_index(name=count_name)
+def summarize_dimension(cleaned: pd.DataFrame, dimension: str, label: str, majors: List[str], limit: Optional[int] = None) -> pd.DataFrame:
+    use_majors = majors[:2]  # Preserve the exact A:E / G:K template width.
+    rows = []
+    for value, group in cleaned.groupby(cleaned[dimension].fillna("Unspecified").replace("", "Unspecified"), dropna=False):
+        row = {
+            label: value,
+            "Placements": int(len(group)),
+            "Unique Companies": int(group["Company"].nunique()),
+        }
+        for major in use_majors:
+            row[major] = int((group["Major"] == major).sum())
+        rows.append(row)
+    cols = [label, "Placements", "Unique Companies"] + use_majors
+    out = pd.DataFrame(rows, columns=cols)
+    if out.empty:
+        return pd.DataFrame(columns=cols)
+    out = out.sort_values(["Placements", label], ascending=[False, True]).reset_index(drop=True)
+    if limit:
+        out = out.head(limit)
+    return out
 
-    top_major_cols = [m for m in majors if m in company_targets.columns][:6]
-    top_cols = ["Company", "Total Placements"] + top_major_cols + ["Employer Tier", "Recruiting Priority"]
-    summary = {
-        "Top Companies": company_targets[top_cols].head(20).copy() if not company_targets.empty else pd.DataFrame(columns=top_cols),
-        "Major Mix": vc_frame(cleaned["Major"], "Major"),
-        "Industry Mix": vc_frame(cleaned["Industry"], "Industry", limit=15),
-        "Functional Area Mix": vc_frame(cleaned["Functional Area"], "Functional Area", limit=15),
-        "Job Role Mix": vc_frame(cleaned["Job Role"], "Job Role", limit=15),
-        "State Mix": vc_frame(cleaned["State"], "State", limit=15),
-        "Class Year Mix": vc_frame(cleaned["Class of"], "Class of", limit=15),
-        "Employer Tier Mix": vc_frame(company_targets["Employer Tier"], "Employer Tier", count_name="Companies") if not company_targets.empty else pd.DataFrame(columns=["Employer Tier", "Companies"]),
+
+def make_summary_tables(cleaned: pd.DataFrame, company_targets: pd.DataFrame, majors: List[str]) -> Dict[str, pd.DataFrame]:
+    employer_rows = []
+    for tier, group in company_targets.groupby("Employer Tier", dropna=False):
+        companies = int(group["Company"].nunique())
+        placements = int(group["Total Placements"].sum())
+        row = {"Employer Tier": tier, "Placements": placements, "Unique Companies": companies}
+        for major in majors[:2]:
+            row[major] = int(group[major].sum()) if major in group.columns else 0
+        employer_rows.append(row)
+    employer_cols = ["Employer Tier", "Placements", "Unique Companies"] + majors[:2]
+    employer = pd.DataFrame(employer_rows, columns=employer_cols)
+    if not employer.empty:
+        order = {"Tier 1 — Core employer": 1, "Tier 2 — Relationship employer": 2, "Tier 3 — Emerging employer": 3}
+        employer["_order"] = employer["Employer Tier"].map(order).fillna(99)
+        employer = employer.sort_values("_order").drop(columns=["_order"])
+
+    return {
+        "Industry Summary": summarize_dimension(cleaned, "Industry", "Industry", majors),
+        "Functional Area Summary": summarize_dimension(cleaned, "Functional Area", "Functional Area", majors),
+        "Job Role Summary": summarize_dimension(cleaned, "Job Role", "Job Role", majors),
+        "State Summary": summarize_dimension(cleaned, "State", "State", majors),
+        "Class Year Summary": summarize_dimension(cleaned, "Class Year", "Class Year", majors),
+        "Employer Tier Summary": employer,
     }
-    return summary
 
 
 def prepare_contact_data(contact_df: Optional[pd.DataFrame]) -> Optional[pd.DataFrame]:
@@ -450,42 +457,22 @@ def prepare_contact_data(contact_df: Optional[pd.DataFrame]) -> Optional[pd.Data
     mapping = infer_columns(contact_df, CONTACT_ALIASES)
     if "company" not in mapping:
         return None
-
     out = pd.DataFrame()
-    out["Company"] = contact_df[mapping["company"]].apply(lambda x: "" if pd.isna(x) else str(x).strip())
-
+    out["Company"] = contact_df[mapping["company"]].apply(display_value)
     field_map = [
-        ("handshake", "Handshake Link"),
-        ("website", "Website"),
-        ("linkedin", "LinkedIn"),
-        ("owner", "Employer Owner"),
-        ("css", "CSS Assigned"),
-        ("main_contact", "Main Contact"),
-        ("primary_contact", "Primary Contact"),
-        ("email", "Recruiter Email"),
-        ("phone", "Recruiter Phone"),
-        ("engagement_status", "Engagement Status"),
-        ("outreach_status", "Outreach Status"),
-        ("last_contacted", "Last Contacted Date"),
-        ("location", "Contact Location"),
-        ("employee_count", "Employee Count"),
+        ("handshake", "Handshake Link"), ("website", "Website"), ("linkedin", "LinkedIn"),
+        ("owner", "Employer Owner"), ("css", "CSS Assigned"), ("main_contact", "Main Contact"),
+        ("primary_contact", "Primary Contact"), ("email", "Recruiter Email"), ("phone", "Recruiter Phone"),
+        ("engagement_status", "Engagement Status"), ("outreach_status", "Outreach Status"),
+        ("last_contacted", "Last Contacted Date"), ("location", "Contact Location"), ("employee_count", "Employee Count"),
     ]
     for key, out_col in field_map:
-        if key in mapping:
-            out[out_col] = contact_df[mapping[key]].apply(lambda x: "" if pd.isna(x) else str(x).strip())
-        else:
-            out[out_col] = ""
-
-    # Build a cleaner location if City/State/Country exist separately.
+        out[out_col] = contact_df[mapping[key]].apply(display_value) if key in mapping else ""
     norm_cols = {normalize_header(c): c for c in contact_df.columns}
-    loc_parts = []
-    for key in ["city", "state", "country"]:
-        if key in norm_cols:
-            loc_parts.append(norm_cols[key])
+    loc_parts = [norm_cols[k] for k in ["city", "state", "country"] if k in norm_cols]
     if loc_parts:
-        location = contact_df[loc_parts].apply(lambda r: ", ".join([str(v).strip() for v in r if pd.notna(v) and str(v).strip()]), axis=1)
+        location = contact_df[loc_parts].apply(lambda r: ", ".join([display_value(v) for v in r if display_value(v)]), axis=1)
         out["Contact Location"] = out["Contact Location"].where(out["Contact Location"].astype(str).str.strip() != "", location)
-
     out["_norm_company"] = out["Company"].map(normalize_company)
     out = out[out["_norm_company"] != ""].drop_duplicates("_norm_company", keep="first")
     return out
@@ -495,16 +482,14 @@ def enrich_with_contacts(company_targets: pd.DataFrame, contact_df: Optional[pd.
     contacts = prepare_contact_data(contact_df)
     if contacts is None or contacts.empty:
         return company_targets
-
     contact_by_norm = contacts.set_index("_norm_company")
     contact_norms = list(contact_by_norm.index)
     contact_cols = [col for col in CONTACT_COLUMNS if col != "Contact Match Method"]
-
-    enriched_rows = []
+    rows = []
     for _, row in company_targets.iterrows():
         norm = normalize_company(row["Company"])
-        match_method = ""
         matched = None
+        match_method = ""
         if norm in contact_by_norm.index:
             matched = contact_by_norm.loc[norm]
             match_method = "Exact normalized match"
@@ -519,7 +504,6 @@ def enrich_with_contacts(company_targets: pd.DataFrame, contact_df: Optional[pd.
             if best_score >= 0.92 and best_norm:
                 matched = contact_by_norm.loc[best_norm]
                 match_method = f"Fuzzy match ({best_score:.0%})"
-
         new_row = row.to_dict()
         if matched is not None:
             for col in contact_cols:
@@ -529,16 +513,14 @@ def enrich_with_contacts(company_targets: pd.DataFrame, contact_df: Optional[pd.
             for col in contact_cols:
                 new_row[col] = ""
             new_row["Contact Match Method"] = ""
-        enriched_rows.append(new_row)
+        rows.append(new_row)
+    return pd.DataFrame(rows)
 
-    return pd.DataFrame(enriched_rows)
 
-
-def safe_table_name(name: str) -> str:
-    safe = re.sub(r"[^A-Za-z0-9_]", "_", name)
-    if not safe or safe[0].isdigit():
-        safe = "T_" + safe
-    return safe[:250]
+def report_title_with_scope(report_title: str, scope_label: str) -> str:
+    if scope_label and scope_label.strip() and scope_label.lower() not in report_title.lower():
+        return f"{report_title} — {scope_label}"
+    return report_title
 
 
 def write_report_workbook(
@@ -553,251 +535,219 @@ def write_report_workbook(
     output = BytesIO()
     with pd.ExcelWriter(output, engine="xlsxwriter", datetime_format="m/d/yyyy", date_format="m/d/yyyy") as writer:
         workbook = writer.book
-
         navy = "#17365D"
         blue = "#1F4E78"
-        pale_blue = "#EAF3F8"
-        dark_gray = "#404040"
+        pale_blue = "#D9EAF7"
+        border = "#B7B7B7"
+        light_border = "#D9E2F3"
         white = "#FFFFFF"
         green = "#D9EAD3"
         yellow = "#FFF2CC"
         orange = "#FCE4D6"
+        dark_gray = "#404040"
 
         fmt_title = workbook.add_format({"bold": True, "font_size": 18, "font_color": white, "bg_color": navy, "align": "left", "valign": "vcenter"})
-        fmt_subtitle = workbook.add_format({"font_size": 10, "font_color": dark_gray, "italic": True})
-        fmt_section = workbook.add_format({"bold": True, "font_size": 12, "font_color": white, "bg_color": blue, "align": "left"})
-        fmt_header = workbook.add_format({"bold": True, "font_color": white, "bg_color": blue, "border": 1, "border_color": "#B7B7B7", "align": "center", "valign": "vcenter", "text_wrap": True})
-        fmt_text = workbook.add_format({"border": 1, "border_color": "#D9E2F3", "valign": "top", "text_wrap": True})
-        fmt_num = workbook.add_format({"border": 1, "border_color": "#D9E2F3", "valign": "top", "num_format": "#,##0"})
-        fmt_date = workbook.add_format({"border": 1, "border_color": "#D9E2F3", "valign": "top", "num_format": "m/d/yyyy"})
-        fmt_kpi_label = workbook.add_format({"font_size": 9, "font_color": dark_gray, "align": "center", "valign": "vcenter", "bg_color": pale_blue})
-        fmt_kpi_value = workbook.add_format({"bold": True, "font_size": 18, "font_color": navy, "align": "center", "valign": "vcenter", "bg_color": pale_blue})
+        fmt_section = workbook.add_format({"bold": True, "font_size": 11, "font_color": white, "bg_color": blue, "border": 1, "border_color": border, "align": "left", "valign": "vcenter"})
+        fmt_header = workbook.add_format({"bold": True, "font_color": white, "bg_color": blue, "border": 1, "border_color": border, "align": "center", "valign": "vcenter", "text_wrap": True})
+        fmt_text = workbook.add_format({"border": 1, "border_color": light_border, "valign": "top", "text_wrap": True})
+        fmt_num = workbook.add_format({"border": 1, "border_color": light_border, "valign": "top", "num_format": "#,##0"})
+        fmt_date = workbook.add_format({"border": 1, "border_color": light_border, "valign": "top", "num_format": "m/d/yyyy"})
+        fmt_kpi_label = workbook.add_format({"bold": True, "font_color": white, "bg_color": blue, "align": "center", "valign": "vcenter", "border": 1, "border_color": border})
+        fmt_kpi_value = workbook.add_format({"bold": True, "font_size": 16, "font_color": navy, "bg_color": pale_blue, "align": "center", "valign": "vcenter", "border": 1, "border_color": border, "num_format": "#,##0"})
+        fmt_kpi_text = workbook.add_format({"bold": True, "font_size": 13, "font_color": navy, "bg_color": pale_blue, "align": "center", "valign": "vcenter", "border": 1, "border_color": border})
         fmt_note = workbook.add_format({"font_size": 9, "font_color": dark_gray, "text_wrap": True, "valign": "top"})
-        fmt_high = workbook.add_format({"bg_color": green, "font_color": "#274E13", "border": 1, "border_color": "#D9E2F3"})
-        fmt_medium = workbook.add_format({"bg_color": yellow, "font_color": "#7F6000", "border": 1, "border_color": "#D9E2F3"})
-        fmt_monitor = workbook.add_format({"bg_color": orange, "font_color": "#7F2A00", "border": 1, "border_color": "#D9E2F3"})
-        fmt_link = workbook.add_format({"font_color": "#0563C1", "underline": 1, "border": 1, "border_color": "#D9E2F3", "text_wrap": True})
+        fmt_high = workbook.add_format({"bg_color": green, "font_color": "#274E13", "border": 1, "border_color": light_border})
+        fmt_medium = workbook.add_format({"bg_color": yellow, "font_color": "#7F6000", "border": 1, "border_color": light_border})
+        fmt_monitor = workbook.add_format({"bg_color": orange, "font_color": "#7F2A00", "border": 1, "border_color": light_border})
+        fmt_link = workbook.add_format({"font_color": "#0563C1", "underline": 1, "border": 1, "border_color": light_border, "text_wrap": True})
 
         dash = workbook.add_worksheet("Executive Dashboard")
         targets_ws = workbook.add_worksheet("Company Targets")
         summary_ws = workbook.add_worksheet("Summary Tables")
         detail_ws = workbook.add_worksheet("Placement Detail")
-        writer.sheets.update({
-            "Executive Dashboard": dash,
-            "Company Targets": targets_ws,
-            "Summary Tables": summary_ws,
-            "Placement Detail": detail_ws,
-        })
-
         for ws in [dash, targets_ws, summary_ws, detail_ws]:
             ws.hide_gridlines(2)
             ws.set_tab_color(blue)
 
-        dash.set_column("A:A", 18)
-        dash.set_column("B:C", 14)
-        dash.set_column("D:D", 3)
-        dash.set_column("E:G", 15)
-        dash.set_column("H:H", 3)
-        dash.set_column("I:K", 15)
-        dash.set_column("L:M", 15)
-        dash.set_row(0, 28)
-        dash.merge_range("A1:M1", f"{report_title} — {scope_label}", fmt_title)
-        major_caption = ", ".join(majors[:8]) + (f" + {len(majors) - 8} more" if len(majors) > 8 else "")
-        dash.merge_range("A2:M2", f"Scope: {scope_label}. Major/program coverage: {major_caption or 'All detected programs'}. Company focus; contact fields are included only when provided in the upload/contact file.", fmt_subtitle)
+        # Executive Dashboard: matches uploaded 5-year IS/MISM format.
+        dash.set_column("A:A", 28)
+        for col in ["B", "C", "D", "E", "G", "H", "J", "K", "M"]:
+            dash.set_column(f"{col}:{col}", 13)
+        dash.set_column("F:F", 28)
+        dash.set_column("I:I", 28)
+        dash.set_column("L:L", 16)
+        dash.set_row(0, 37.25)
+        dash.set_row(2, 18)
+        dash.merge_range("A1:M1", report_title_with_scope(report_title, scope_label), fmt_title)
 
-        kpi_items = [
-            ("Placements", metrics.get("Placements", 0)),
-            ("Unique Companies", metrics.get("Unique Companies", 0)),
-            ("Majors / Programs", metrics.get("Majors / Programs", 0)),
-            ("Top Major", metrics.get("Top Major", "—")),
-            ("Tier 1 Employers", metrics.get("Tier 1 Employers", 0)),
-            ("Tier 2 Employers", metrics.get("Tier 2 Employers", 0)),
+        major_counts = cleaned["Major"].value_counts()
+        first_major = majors[0] if majors else "Major"
+        second_major = majors[1] if len(majors) > 1 else None
+        kpis = [
+            ("A2:C2", "A3:C3", "Total Placements", metrics.get("Placements", 0)),
+            ("D2:F2", "D3:F3", "Unique Companies", metrics.get("Unique Companies", 0)),
+            ("G2:I2", "G3:I3", f"{first_major} Placements", int(major_counts.get(first_major, 0))),
+            ("J2:M2", "J3:M3", f"{second_major} Placements" if second_major else "Tier 1 Employers", int(major_counts.get(second_major, 0)) if second_major else metrics.get("Tier 1 Employers", 0)),
         ]
-        kpi_ranges = ["A4:B5", "C4:D5", "E4:F5", "G4:H5", "I4:J5", "K4:M5"]
-        label_positions = [(5, 0, 5, 1), (5, 2, 5, 3), (5, 4, 5, 5), (5, 6, 5, 7), (5, 8, 5, 9), (5, 10, 5, 12)]
-        for (label, value), cell_range, (r1, c1, r2, c2) in zip(kpi_items, kpi_ranges, label_positions):
-            dash.merge_range(cell_range, value, fmt_kpi_value)
-            dash.merge_range(r1, c1, r2, c2, label, fmt_kpi_label)
+        for label_range, value_range, label, value in kpis:
+            dash.merge_range(label_range, label, fmt_kpi_label)
+            fmt = fmt_kpi_text if isinstance(value, str) else fmt_kpi_value
+            dash.merge_range(value_range, value, fmt)
 
-        dash.merge_range("A8:C8", "Top Companies by Placements", fmt_section)
-        dash.merge_range("E8:G8", "Placement Mix by Industry", fmt_section)
-        dash.merge_range("I8:K8", "Functional Area Mix", fmt_section)
-        dash.merge_range("A31:C31", "Major Mix", fmt_section)
-        dash.merge_range("E31:G31", "Employer Tier Mix", fmt_section)
-        dash.merge_range("I31:M31", "Director Notes", fmt_section)
-        dash.merge_range("I32:M37", "Use the Company Targets sheet as the working list for outreach. Tier 1 employers represent the highest placement volume in the uploaded file; Tier 2 employers are relationship-building targets; Tier 3 employers should be monitored for emerging recruiting potential. The report works for one major, multiple majors, or a ZIP of major-specific placement exports.", fmt_note)
+        dash.merge_range("A5:D5", "Top Companies by Placements", fmt_section)
+        dash.merge_range("F5:G5", "Placement Mix by Industry", fmt_section)
+        dash.merge_range("I5:J5", "Functional Area Mix", fmt_section)
+        dash.merge_range("L5:M5", "Major Mix", fmt_section)
 
-        summary_ws.set_column("A:A", 28)
-        summary_ws.set_column("B:K", 16)
-        summary_ws.merge_range("A1:K1", f"Summary Tables — {scope_label} Employer Placements", fmt_title)
-        summary_ws.write("A2", "These tables feed the dashboard charts and provide quick drilldowns for director review.", fmt_subtitle)
+        top_companies = company_targets[["Company", "Total Placements"] + [m for m in majors[:2] if m in company_targets.columns]].head(12).copy()
+        while len(top_companies.columns) < 4:
+            top_companies[f" "] = ""
+        top_companies = top_companies.iloc[:, :4]
+        top_companies.columns = ["Company", "Placements"] + [m for m in majors[:2]] + ([""] * (4 - 2 - len(majors[:2])))
 
-        def write_df(ws, df: pd.DataFrame, start_row: int, start_col: int, title: str) -> Tuple[int, int, int, int]:
-            ws.write(start_row, start_col, title, fmt_section)
+        industry_dash = summary["Industry Summary"].iloc[:, [0, 1]].head(12) if not summary["Industry Summary"].empty else pd.DataFrame(columns=["Industry", "Placements"])
+        functional_dash = summary["Functional Area Summary"].iloc[:, [0, 1]].head(12) if not summary["Functional Area Summary"].empty else pd.DataFrame(columns=["Functional Area", "Placements"])
+        major_dash = cleaned["Major"].value_counts().rename_axis("Major").reset_index(name="Placements").head(12)
+
+        def write_dashboard_block(df: pd.DataFrame, start_row: int, start_col: int):
             for c, col in enumerate(df.columns):
-                ws.write(start_row + 1, start_col + c, col, fmt_header)
-            for r, (_, record) in enumerate(df.iterrows(), start=start_row + 2):
+                dash.write(start_row, start_col + c, col, fmt_header)
+            for r, (_, record) in enumerate(df.iterrows(), start=start_row + 1):
                 for c, col in enumerate(df.columns):
                     value = record[col]
-                    if pd.isna(value):
-                        value = ""
-                    cell_fmt = fmt_num if isinstance(value, (int, float)) and not isinstance(value, bool) else fmt_text
-                    ws.write(r, start_col + c, value, cell_fmt)
-            return (start_row, start_col, start_row + len(df) + 1, start_col + max(0, len(df.columns) - 1))
+                    dash.write(r, start_col + c, value, fmt_num if isinstance(value, (int, float)) and not isinstance(value, bool) else fmt_text)
 
-        positions = {}
-        positions["Top Companies"] = write_df(summary_ws, summary["Top Companies"], 3, 0, "Top 20 Companies")
-        positions["Major Mix"] = write_df(summary_ws, summary["Major Mix"], 3, 7, "Major Mix")
-        positions["Industry Mix"] = write_df(summary_ws, summary["Industry Mix"], 28, 0, "Industry Mix")
-        positions["Functional Area Mix"] = write_df(summary_ws, summary["Functional Area Mix"], 28, 4, "Functional Area Mix")
-        positions["Employer Tier Mix"] = write_df(summary_ws, summary["Employer Tier Mix"], 28, 8, "Employer Tier Mix")
-        positions["Job Role Mix"] = write_df(summary_ws, summary["Job Role Mix"], 48, 0, "Job Role Mix")
-        positions["State Mix"] = write_df(summary_ws, summary["State Mix"], 48, 4, "State Mix")
-        positions["Class Year Mix"] = write_df(summary_ws, summary["Class Year Mix"], 48, 8, "Class Year Mix")
+        write_dashboard_block(top_companies, 5, 0)
+        write_dashboard_block(industry_dash, 5, 5)
+        write_dashboard_block(functional_dash, 5, 8)
+        write_dashboard_block(major_dash, 5, 11)
 
-        def add_bar_chart(title: str, sheet_range: Tuple[int, int, int, int], name_col_offset: int, value_col_offset: int):
-            r1, c1, r2, c2 = sheet_range
+        def add_dashboard_bar(title: str, sheet_name: str, first_data_row: int, first_col: int, last_data_row: int, chart_width: int = 650):
             chart = workbook.add_chart({"type": "bar"})
             chart.add_series({
                 "name": title,
-                "categories": ["Summary Tables", r1 + 2, c1 + name_col_offset, r2, c1 + name_col_offset],
-                "values": ["Summary Tables", r1 + 2, c1 + value_col_offset, r2, c1 + value_col_offset],
+                "categories": [sheet_name, first_data_row, first_col, last_data_row, first_col],
+                "values": [sheet_name, first_data_row, first_col + 1, last_data_row, first_col + 1],
                 "data_labels": {"value": True},
             })
             chart.set_title({"name": title})
             chart.set_legend({"none": True})
             chart.set_style(10)
-            chart.set_size({"width": 430, "height": 250})
+            chart.set_size({"width": chart_width, "height": 360})
+            chart.set_x_axis({"major_gridlines": {"visible": False}})
             return chart
 
-        def add_pie_chart(title: str, sheet_range: Tuple[int, int, int, int], name_col_offset: int, value_col_offset: int):
-            r1, c1, r2, c2 = sheet_range
-            chart = workbook.add_chart({"type": "pie"})
-            chart.add_series({
-                "name": title,
-                "categories": ["Summary Tables", r1 + 2, c1 + name_col_offset, r2, c1 + name_col_offset],
-                "values": ["Summary Tables", r1 + 2, c1 + value_col_offset, r2, c1 + value_col_offset],
-                "data_labels": {"percentage": True},
-            })
-            chart.set_title({"name": title})
-            chart.set_style(10)
-            chart.set_size({"width": 390, "height": 250})
-            return chart
+        # Chart anchors mirror the uploaded format: two charts across, two charts down.
+        dash.insert_chart("A20", add_dashboard_bar("Top Companies by Placements", "Executive Dashboard", 6, 0, min(17, 6 + len(top_companies) - 1), 650))
+        dash.insert_chart("H20", add_dashboard_bar("Placement Mix by Industry", "Executive Dashboard", 6, 5, min(17, 6 + len(industry_dash) - 1), 560))
+        dash.insert_chart("A40", add_dashboard_bar("Functional Area Mix", "Executive Dashboard", 6, 8, min(17, 6 + len(functional_dash) - 1), 650))
+        dash.insert_chart("H40", add_dashboard_bar("Major Mix", "Executive Dashboard", 6, 11, min(17, 6 + len(major_dash) - 1), 560))
 
-        if not company_targets.empty:
-            dash.insert_chart("A9", add_bar_chart("Top Companies", positions["Top Companies"], 0, 1))
-            dash.insert_chart("E9", add_pie_chart("Industry Mix", positions["Industry Mix"], 0, 1))
-            dash.insert_chart("I9", add_bar_chart("Functional Area Mix", positions["Functional Area Mix"], 0, 1))
-            dash.insert_chart("A32", add_pie_chart("Major Mix", positions["Major Mix"], 0, 1))
-            dash.insert_chart("E32", add_pie_chart("Employer Tier Mix", positions["Employer Tier Mix"], 0, 1))
-
-        targets_ws.set_column("A:A", 8)
-        targets_ws.set_column("B:B", 32)
-        targets_ws.set_column("C:C", 14)
-        if majors:
-            start_major_col = 3  # D, zero-based after Rank/Company/Total Placements
-            end_major_col = start_major_col + len(majors) - 1
-            targets_ws.set_column(start_major_col, end_major_col, 11)
-            post_start = end_major_col + 1
-        else:
-            post_start = 3
-        targets_ws.set_column(post_start, post_start, 18)  # Major Mix
-        targets_ws.set_column(post_start + 1, post_start + 1, 20)  # Class years
-        targets_ws.set_column(post_start + 2, post_start + 4, 22)
-        targets_ws.set_column(post_start + 5, post_start + 5, 42)
-        targets_ws.set_column(post_start + 6, post_start + 6, 28)
-        targets_ws.set_column(post_start + 7, post_start + 8, 14)
-        targets_ws.set_column(post_start + 9, post_start + 10, 24)
-        if any(col in company_targets.columns for col in CONTACT_COLUMNS):
-            contact_start = len(company_targets.columns) - len(CONTACT_COLUMNS)
-            targets_ws.set_column(contact_start, len(company_targets.columns), 24)
+        # Company Targets sheet.
         targets_ws.freeze_panes(1, 2)
-
-        for col_idx, col in enumerate(company_targets.columns):
-            targets_ws.write(0, col_idx, col, fmt_header)
-        for row_idx, (_, record) in enumerate(company_targets.iterrows(), start=1):
-            for col_idx, col in enumerate(company_targets.columns):
+        widths = [8, 30, 12]
+        widths += [13] * len(majors)
+        widths += [14, 22, 24, 13, 30, 42, 28, 14, 13, 25, 18]
+        widths += [24] * max(0, len(company_targets.columns) - len(widths))
+        for i, width in enumerate(widths[:len(company_targets.columns)]):
+            targets_ws.set_column(i, i, width)
+        for c, col in enumerate(company_targets.columns):
+            targets_ws.write(0, c, col, fmt_header)
+        for r, (_, record) in enumerate(company_targets.iterrows(), start=1):
+            for c, col in enumerate(company_targets.columns):
                 value = record[col]
                 if pd.isna(value):
                     value = ""
                 if col in ["First Start Date", "Latest Start Date", "Last Contacted Date"] and value != "":
                     try:
-                        value = pd.to_datetime(value).to_pydatetime()
-                        targets_ws.write_datetime(row_idx, col_idx, value, fmt_date)
+                        targets_ws.write_datetime(r, c, pd.to_datetime(value).to_pydatetime(), fmt_date)
                     except Exception:
-                        targets_ws.write(row_idx, col_idx, str(value), fmt_text)
+                        targets_ws.write(r, c, display_value(value), fmt_text)
                 elif col in ["Rank", "Total Placements", "Employee Count"] + majors:
                     try:
-                        targets_ws.write_number(row_idx, col_idx, float(value), fmt_num)
+                        targets_ws.write_number(r, c, float(value), fmt_num)
                     except Exception:
-                        targets_ws.write(row_idx, col_idx, value, fmt_text)
+                        targets_ws.write(r, c, display_value(value), fmt_text)
                 elif col in ["Handshake Link", "Website", "LinkedIn"] and str(value).startswith("http"):
-                    targets_ws.write_url(row_idx, col_idx, str(value), fmt_link, string=str(value))
+                    targets_ws.write_url(r, c, str(value), fmt_link, string=str(value))
                 elif col == "Recruiting Priority":
-                    if value == "High":
-                        targets_ws.write(row_idx, col_idx, value, fmt_high)
-                    elif value == "Medium":
-                        targets_ws.write(row_idx, col_idx, value, fmt_medium)
-                    else:
-                        targets_ws.write(row_idx, col_idx, value, fmt_monitor)
+                    targets_ws.write(r, c, value, fmt_high if value == "High" else fmt_medium if value == "Medium" else fmt_monitor)
                 else:
-                    targets_ws.write(row_idx, col_idx, value, fmt_text)
+                    targets_ws.write(r, c, value, fmt_text)
         if len(company_targets) > 0:
             targets_ws.add_table(0, 0, len(company_targets), len(company_targets.columns) - 1, {
-                "name": "CompanyTargets",
+                "name": "CompanyTargets5Year",
                 "columns": [{"header": col} for col in company_targets.columns],
                 "style": "Table Style Medium 2",
             })
-            priority_col = list(company_targets.columns).index("Recruiting Priority")
-            targets_ws.data_validation(1, priority_col, len(company_targets), priority_col, {"validate": "list", "source": ["High", "Medium", "Monitor"]})
+            if "Recruiting Priority" in company_targets.columns:
+                priority_col = list(company_targets.columns).index("Recruiting Priority")
+                targets_ws.data_validation(1, priority_col, len(company_targets), priority_col, {"validate": "list", "source": ["High", "Medium", "Monitor"]})
 
-        detail_ws.set_column("A:A", 32)
-        detail_ws.set_column("B:B", 14)
-        detail_ws.set_column("C:F", 22)
-        detail_ws.set_column("G:G", 24)
-        detail_ws.set_column("H:H", 14)
-        detail_ws.set_column("I:J", 16)
-        detail_ws.set_column("K:L", 22)
+        # Summary Tables: exact same block locations as the IS/MISM 5-year template.
+        summary_ws.set_column("A:A", 30)
+        summary_ws.set_column("B:B", 16)
+        summary_ws.set_column("C:E", 13)
+        summary_ws.set_column("F:F", 4)
+        summary_ws.set_column("G:G", 30)
+        summary_ws.set_column("H:H", 16)
+        summary_ws.set_column("I:K", 13)
+        summary_ws.set_row(0, 32)
+        summary_ws.merge_range("A1:K1", f"Summary Tables — {scope_label} {('/'.join(majors[:2]) if majors else 'Employer')} Placements", fmt_title)
+
+        def write_summary_block(title: str, df: pd.DataFrame, top_row: int, left_col: int, width_cols: int = 5):
+            summary_ws.merge_range(top_row, left_col, top_row, left_col + width_cols - 1, title, fmt_section)
+            for c in range(width_cols):
+                header = df.columns[c] if c < len(df.columns) else ""
+                summary_ws.write(top_row + 1, left_col + c, header, fmt_header)
+            for r, (_, record) in enumerate(df.iterrows(), start=top_row + 2):
+                for c in range(width_cols):
+                    if c < len(df.columns):
+                        val = record[df.columns[c]]
+                    else:
+                        val = ""
+                    if pd.isna(val):
+                        val = ""
+                    summary_ws.write(r, left_col + c, val, fmt_num if isinstance(val, (int, float)) and not isinstance(val, bool) else fmt_text)
+
+        write_summary_block("Industry Summary", summary["Industry Summary"], 2, 0)
+        write_summary_block("Functional Area Summary", summary["Functional Area Summary"], 2, 6)
+        write_summary_block("Job Role Summary", summary["Job Role Summary"], 18, 0)
+        write_summary_block("State Summary", summary["State Summary"], 18, 6)
+        write_summary_block("Class Year Summary", summary["Class Year Summary"], 58, 0)
+        write_summary_block("Employer Tier Summary", summary["Employer Tier Summary"], 58, 6)
+
+        # Placement detail sheet: exact same column order as the template.
+        detail_widths = [14, 14, 14, 30, 14, 20, 36, 12, 22, 26, 14, 18]
+        for i, width in enumerate(detail_widths):
+            detail_ws.set_column(i, i, width)
         detail_ws.freeze_panes(1, 0)
-        for col_idx, col in enumerate(cleaned.columns):
-            detail_ws.write(0, col_idx, col, fmt_header)
-        for row_idx, (_, record) in enumerate(cleaned.iterrows(), start=1):
-            for col_idx, col in enumerate(cleaned.columns):
+        for c, col in enumerate(cleaned.columns):
+            detail_ws.write(0, c, col, fmt_header)
+        for r, (_, record) in enumerate(cleaned.iterrows(), start=1):
+            for c, col in enumerate(cleaned.columns):
                 value = record[col]
                 if pd.isna(value):
                     value = ""
                 if col == "Start Date" and value != "":
                     try:
-                        value = pd.to_datetime(value).to_pydatetime()
-                        detail_ws.write_datetime(row_idx, col_idx, value, fmt_date)
+                        detail_ws.write_datetime(r, c, pd.to_datetime(value).to_pydatetime(), fmt_date)
                     except Exception:
-                        detail_ws.write(row_idx, col_idx, str(value), fmt_text)
+                        detail_ws.write(r, c, display_value(value), fmt_text)
                 else:
-                    detail_ws.write(row_idx, col_idx, value, fmt_text)
+                    detail_ws.write(r, c, value, fmt_text)
         if len(cleaned) > 0:
             detail_ws.add_table(0, 0, len(cleaned), len(cleaned.columns) - 1, {
-                "name": "PlacementDetail",
+                "name": "PlacementDetail5Year",
                 "columns": [{"header": col} for col in cleaned.columns],
                 "style": "Table Style Medium 2",
             })
 
-        note_row = 68
-        summary_ws.merge_range(note_row, 0, note_row, 10, "Data Notes", fmt_section)
-        notes = [
-            "Source: uploaded Excel placement file or ZIP of major-specific placement files.",
-            "Company Targets are grouped by company name after basic text normalization. Review unusual naming variants manually if needed.",
-            "Major columns are generated dynamically from the uploaded data; the app is not hardcoded to BSIS/MISM.",
-            "Employer tiers are dynamic: Tier 1 and Tier 2 thresholds scale with total placement volume so past-year and five-year files remain comparable.",
-            "Recruiter names, emails, and phone numbers are not generated. Contact fields appear only when a contact/enrichment workbook is uploaded and matched.",
-        ]
-        for i, note in enumerate(notes, start=note_row + 1):
-            summary_ws.merge_range(i, 0, i, 10, note, fmt_note)
-
+        # Print settings.
         dash.set_landscape(); dash.fit_to_pages(1, 1)
         targets_ws.set_landscape(); targets_ws.fit_to_pages(1, 0)
         summary_ws.set_landscape(); summary_ws.fit_to_pages(1, 0)
         detail_ws.set_landscape(); detail_ws.fit_to_pages(1, 0)
-
     output.seek(0)
     return output.getvalue()
 
@@ -805,7 +755,7 @@ def write_report_workbook(
 def build_report(
     placement_df: pd.DataFrame,
     report_title: str = "Employer Recruiting Report",
-    scope_label: str = "Placement View",
+    scope_label: str = "5-Year View",
     selected_majors: Optional[List[str]] = None,
     contact_df: Optional[pd.DataFrame] = None,
     default_major: Optional[str] = None,
@@ -814,7 +764,6 @@ def build_report(
     company_targets, majors = make_company_targets(cleaned)
     company_targets = enrich_with_contacts(company_targets, contact_df)
     summary = make_summary_tables(cleaned, company_targets, majors)
-
     major_counts = cleaned["Major"].value_counts()
     top_major = major_counts.index[0] if not major_counts.empty else "—"
     metrics: Dict[str, object] = {
@@ -826,7 +775,6 @@ def build_report(
         "Tier 1 Employers": int((company_targets["Employer Tier"] == "Tier 1 — Core employer").sum()) if not company_targets.empty else 0,
         "Tier 2 Employers": int((company_targets["Employer Tier"] == "Tier 2 — Relationship employer").sum()) if not company_targets.empty else 0,
     }
-
     report_bytes = write_report_workbook(cleaned, company_targets, summary, majors, metrics, report_title, scope_label)
     return report_bytes, metrics, company_targets, cleaned
 
@@ -835,7 +783,7 @@ def build_reports_by_major_zip(
     placement_df: pd.DataFrame,
     majors: List[str],
     report_title_prefix: str = "Employer Recruiting Report",
-    scope_label: str = "Placement View",
+    scope_label: str = "5-Year View",
     contact_df: Optional[pd.DataFrame] = None,
 ) -> bytes:
     output = BytesIO()
