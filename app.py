@@ -61,7 +61,7 @@ try:
         placement_df, manifest = read_zip_placements(placement_bytes)
         st.success(f"Imported {len(excel_manifest)} Excel files from the ZIP.")
         with st.expander("Imported files", expanded=False):
-            st.dataframe(manifest, use_container_width=True)
+            st.dataframe(manifest, width="stretch")
     else:
         sheets = read_excel_sheets(placement_bytes)
         lowered = [s.lower() for s in sheets]
@@ -80,7 +80,7 @@ if contact_file:
         if contact_file.name.lower().endswith(".zip"):
             contact_df, contact_manifest = read_zip_placements(contact_bytes)
             with st.expander("Imported contact files", expanded=False):
-                st.dataframe(contact_manifest, use_container_width=True)
+                st.dataframe(contact_manifest, width="stretch")
         else:
             contact_sheets = read_excel_sheets(contact_bytes)
             contact_sheet = st.selectbox("Contact sheet", contact_sheets, index=0)
@@ -110,7 +110,7 @@ if detected_majors and len(selected_majors) > 1:
     make_per_major_zip = st.checkbox("Also generate one separate workbook per selected major", value=True)
 
 st.subheader("Source Preview")
-st.dataframe(placement_df.head(25), use_container_width=True)
+st.dataframe(placement_df.head(25), width="stretch")
 
 try:
     preview_clean, _, _ = clean_placement_data(
@@ -153,7 +153,7 @@ if st.button("Generate report", type="primary"):
     left, right = st.columns([2, 1])
     with left:
         st.markdown("### Top companies")
-        st.dataframe(company_targets.head(25), use_container_width=True)
+        st.dataframe(company_targets.head(25), width="stretch")
     with right:
         st.markdown("### Top 10 chart")
         if not company_targets.empty:
