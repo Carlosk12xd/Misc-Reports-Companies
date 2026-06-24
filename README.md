@@ -1,26 +1,45 @@
-# IS/MISM Employer Recruiting Report Builder
+# Employer Recruiting Report Builder
 
-This Streamlit app converts a placement Excel export into a director-ready IS/MISM employer recruiting workbook with the same structure as the past-year and five-year company reports.
+This Streamlit app converts placement exports into a director-ready, company-focused recruiting workbook. It uses the same style and structure as the five-year company report, but it is **not hardcoded to IS/MISM**.
 
-## What it creates
+## What it handles
 
-The generated Excel file includes four sheets:
+- A single `.xlsx` / `.xls` placement export.
+- A `.zip` containing multiple major/program folders, each with its own Excel placement export, such as:
+  - `MBA/Full_Time_Placements_2026_06_24.xlsx`
+  - `Finance/Full_Time_Placements_2026_06_24.xlsx`
+  - `ACC/Full_Time_Placements_2026_06_24.xlsx`
+- Any major/program code found in the data, including MBA, BSFin, MAcc, BSGSCM, BSHRM, BSBusM, BSEDM, MPA, BSStrat, BSEnt, BSIS, MISM, or future programs.
+- Optional CRM/Handshake/contact exports for company contact enrichment.
+
+## Generated workbook
+
+The generated report includes:
 
 1. **Executive Dashboard** — KPIs and charts.
-2. **Company Targets** — ranked employer list with placement counts, BSIS/MISM mix, tier, and recruiting priority.
-3. **Summary Tables** — source tables for industries, functional areas, job roles, states, class years, and tiers.
-4. **Placement Detail** — cleaned row-level placement data.
+2. **Company Targets** — ranked employer list with dynamic major/program count columns.
+3. **Summary Tables** — top companies, major mix, industry mix, functional area mix, role mix, state mix, class-year mix, and tier mix.
+4. **Placement Detail** — cleaned row-level placement data with source file/program fields.
 
-If you upload a separate contact/Handshake/CRM export, the app attempts to match by company name and enriches the Company Targets sheet with available fields such as Handshake link, website, LinkedIn, owner, CSS assigned, primary contact, engagement status, location, and employee count.
+## Key behavior
+
+- The app dynamically detects majors/programs from the uploaded data.
+- Company-level columns change depending on the majors included in the file.
+- The dashboard KPI block is generic: placements, companies, number of majors/programs, top major, Tier 1 employers, and Tier 2 employers.
+- Employer tiers scale with placement volume so past-year and five-year reports stay comparable.
+- Contact fields are only filled when present in an uploaded CRM/Handshake/contact file. The app does not invent recruiter names, emails, or phone numbers.
+- When uploading a ZIP with multiple majors, the app can generate:
+  - one combined cross-major report, and
+  - a ZIP containing one separate report per selected major.
 
 ## Expected placement columns
 
-The app auto-detects common column names. The placement file should include at least:
+Required:
 
-- Company
-- Major
+- Company / Employer
+- Major / Program
 
-Recommended columns:
+Recommended:
 
 - Job Role
 - Job Title
@@ -30,6 +49,8 @@ Recommended columns:
 - Start Date
 - State
 - Student ID
+
+The app auto-detects common variations of these column names.
 
 ## Run locally
 
@@ -42,10 +63,8 @@ streamlit run app.py
 
 1. Push these files to a GitHub repository.
 2. Go to Streamlit Community Cloud.
-3. Choose the repository and set `app.py` as the entry point.
-4. Add no secrets unless your future version connects directly to CRM/Handshake APIs.
+3. Select the repository.
+4. Set `app.py` as the entry point.
+5. Deploy.
 
-## Notes
-
-- The app does not invent recruiter emails, phone numbers, or contacts. It only adds contact data when those fields are present in an uploaded contact workbook.
-- Employer tiers scale dynamically with the size of the uploaded placement file so a past-year report and five-year report are comparable.
+No secrets are required unless you later add direct API connections.
