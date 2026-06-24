@@ -755,7 +755,7 @@ def write_report_workbook(
 def build_report(
     placement_df: pd.DataFrame,
     report_title: str = "Employer Recruiting Report",
-    scope_label: str = "5-Year View",
+    scope_label: str = "Year View",
     selected_majors: Optional[List[str]] = None,
     contact_df: Optional[pd.DataFrame] = None,
     default_major: Optional[str] = None,
@@ -783,7 +783,7 @@ def build_reports_by_major_zip(
     placement_df: pd.DataFrame,
     majors: List[str],
     report_title_prefix: str = "Employer Recruiting Report",
-    scope_label: str = "5-Year View",
+    scope_label: str = "Year View",
     contact_df: Optional[pd.DataFrame] = None,
 ) -> bytes:
     output = BytesIO()
