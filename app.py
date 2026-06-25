@@ -23,25 +23,30 @@ st.set_page_config(
 )
 
 st.title("Major Company Recruiting Report Builder")
+st.caption("Version: Period filter visible hotfix — 2026-06-25")
 st.caption(
     "Upload one placement Excel file or a ZIP of major-specific Excel exports. "
     "The app generates the same four-sheet Excel format as the IS/MISM 5-year company report for every major."
 )
 
 with st.sidebar:
-    st.header("Report Settings")
-    report_title = st.text_input("Combined report title", "Employer Recruiting Report")
+    st.header("1. Report Period")
     report_period_choice = st.radio(
-        "Reporting period",
+        "Choose the data window",
         ["5-Year / all uploaded data", "Past year only"],
         index=0,
         help=(
-            "Use the full uploaded file for the 5-year report, or filter to the most recent one-year "
-            "period found in the Start Date / hire date column. If no date is available, the app uses the latest Class Year."
+            "Use all uploaded rows for a 5-year report, or filter to the most recent one-year "
+            "period based on Start Date / hire date. If no date is available, the app uses the latest Class Year."
         ),
+        key="report_period_choice_sidebar",
     )
     report_window = "past_year" if report_period_choice == "Past year only" else "all"
     default_scope_label = "Past Year View" if report_window == "past_year" else "5-Year View"
+    st.success(f"Current selection: {default_scope_label}")
+
+    st.header("2. Report Settings")
+    report_title = st.text_input("Combined report title", "Employer Recruiting Report")
     scope_label = st.text_input("Scope label shown in Excel", default_scope_label)
     default_output_name = "Employer_Recruiting_Report_Past_Year.xlsx" if report_window == "past_year" else "Employer_Recruiting_Report_5_Years.xlsx"
     output_name = st.text_input("Combined report file name", default_output_name)
@@ -51,6 +56,11 @@ with st.sidebar:
     st.write("Executive Dashboard, Company Targets, Summary Tables, Placement Detail")
     st.divider()
     st.write("Optional: upload a CRM/Handshake/contact export to append employer contact fields to Company Targets.")
+
+st.info(
+    f"Active report period: **{scope_label}**. "
+    + ("The generated Excel report will use all uploaded rows." if report_window == "all" else "The generated Excel report will filter to the most recent 12 months before building tables and charts.")
+)
 
 placement_file = st.file_uploader("Upload placement Excel file or ZIP folder export", type=["xlsx", "xls", "zip"])
 contact_file = st.file_uploader("Optional contact / Handshake / CRM file", type=["xlsx", "xls", "zip"], key="contact_file")
