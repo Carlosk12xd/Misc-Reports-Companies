@@ -66,3 +66,8 @@ The sidebar includes a **Reporting period** selector:
 - **Past year only** filters to the past 12 months based on the Start Date / hire date column and labels the workbook as a past-year report by default. If no usable date column exists, the app falls back to the latest Class Year.
 
 The selected label is written into the generated Excel workbook title and summary sheet, so directors can immediately tell whether they are reviewing the 5-year employer view or the past-year employer view.
+
+
+## Major distribution graph option
+
+The sidebar includes an **Include major distribution graph** checkbox. Keep it on for combined cross-major reports. Turn it off when the uploaded file is already for a single major; the Excel report keeps the same template structure but replaces the Major Mix chart area with a short note instead of a redundant one-bar chart.

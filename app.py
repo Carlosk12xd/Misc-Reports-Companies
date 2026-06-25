@@ -23,7 +23,7 @@ st.set_page_config(
 )
 
 st.title("Major Company Recruiting Report Builder")
-st.caption("Version: Period filter visible hotfix — 2026-06-25")
+st.caption("Version: Major graph toggle — 2026-06-25")
 st.caption(
     "Upload one placement Excel file or a ZIP of major-specific Excel exports. "
     "The app generates the same four-sheet Excel format as the IS/MISM 5-year company report for every major."
@@ -45,7 +45,18 @@ with st.sidebar:
     default_scope_label = "Past Year View" if report_window == "past_year" else "5-Year View"
     st.success(f"Current selection: {default_scope_label}")
 
-    st.header("2. Report Settings")
+    st.header("2. Dashboard Options")
+    include_major_distribution_chart = st.checkbox(
+        "Include major distribution graph",
+        value=True,
+        help=(
+            "Turn this off when the file is already filtered to one major. "
+            "The workbook will keep the same template layout but will not add the Major Mix chart."
+        ),
+        key="include_major_distribution_chart",
+    )
+
+    st.header("3. Report Settings")
     report_title = st.text_input("Combined report title", "Employer Recruiting Report")
     scope_label = st.text_input("Scope label shown in Excel", default_scope_label)
     default_output_name = "Employer_Recruiting_Report_Past_Year.xlsx" if report_window == "past_year" else "Employer_Recruiting_Report_5_Years.xlsx"
@@ -153,6 +164,8 @@ try:
     p4.metric("Report period", period_text)
     if report_window == "past_year":
         st.caption(f"Past-year filter method: {period_metadata.get('Filter Method', 'Unknown')}.")
+    if not include_major_distribution_chart:
+        st.caption("Major distribution graph will be skipped in the Excel dashboard.")
 except Exception as exc:
     st.warning(f"Preview could not be cleaned yet: {exc}")
     preview_clean = None
@@ -172,6 +185,7 @@ if st.button("Generate report", type="primary"):
                 contact_df=contact_df,
                 default_major=None if detected_majors else default_major,
                 report_window=report_window,
+                include_major_distribution_chart=include_major_distribution_chart,
             )
         except Exception as exc:
             st.error(str(exc))
@@ -215,6 +229,7 @@ if st.button("Generate report", type="primary"):
                 scope_label=scope_label,
                 contact_df=contact_df,
                 report_window=report_window,
+                include_major_distribution_chart=include_major_distribution_chart,
             )
         except Exception as exc:
             st.error(f"Could not generate reports by major: {exc}")

@@ -594,6 +594,7 @@ def write_report_workbook(
     metrics: Dict[str, object],
     report_title: str,
     scope_label: str,
+    include_major_distribution_chart: bool = True,
 ) -> bytes:
     output = BytesIO()
     with pd.ExcelWriter(output, engine="xlsxwriter", datetime_format="m/d/yyyy", date_format="m/d/yyyy") as writer:
@@ -704,7 +705,11 @@ def write_report_workbook(
         dash.insert_chart("A20", add_dashboard_bar("Top Companies by Placements", "Executive Dashboard", 6, 0, min(17, 6 + len(top_companies) - 1), 650))
         dash.insert_chart("H20", add_dashboard_bar("Placement Mix by Industry", "Executive Dashboard", 6, 5, min(17, 6 + len(industry_dash) - 1), 560))
         dash.insert_chart("A40", add_dashboard_bar("Functional Area Mix", "Executive Dashboard", 6, 8, min(17, 6 + len(functional_dash) - 1), 650))
-        dash.insert_chart("H40", add_dashboard_bar("Major Mix", "Executive Dashboard", 6, 11, min(17, 6 + len(major_dash) - 1), 560))
+        if include_major_distribution_chart:
+            dash.insert_chart("H40", add_dashboard_bar("Major Mix", "Executive Dashboard", 6, 11, min(17, 6 + len(major_dash) - 1), 560))
+        else:
+            dash.merge_range(39, 7, 39, 12, "Major distribution graph skipped", fmt_section)
+            dash.merge_range(40, 7, 43, 12, "Skipped by app setting. This is useful when the uploaded data is already for one major, where a major distribution chart would not add insight.", fmt_note)
 
         # Company Targets sheet.
         targets_ws.freeze_panes(1, 2)
@@ -823,6 +828,7 @@ def build_report(
     contact_df: Optional[pd.DataFrame] = None,
     default_major: Optional[str] = None,
     report_window: str = "all",
+    include_major_distribution_chart: bool = True,
 ) -> Tuple[bytes, Dict[str, object], pd.DataFrame, pd.DataFrame]:
     cleaned, _, _ = clean_placement_data(placement_df, selected_majors=selected_majors, default_major=default_major)
     cleaned, period_metadata = apply_reporting_period(cleaned, report_window=report_window)
@@ -841,7 +847,16 @@ def build_report(
         "Tier 2 Employers": int((company_targets["Employer Tier"] == "Tier 2 — Relationship employer").sum()) if not company_targets.empty else 0,
         **period_metadata,
     }
-    report_bytes = write_report_workbook(cleaned, company_targets, summary, majors, metrics, report_title, scope_label)
+    report_bytes = write_report_workbook(
+        cleaned,
+        company_targets,
+        summary,
+        majors,
+        metrics,
+        report_title,
+        scope_label,
+        include_major_distribution_chart=include_major_distribution_chart,
+    )
     return report_bytes, metrics, company_targets, cleaned
 
 
@@ -852,6 +867,7 @@ def build_reports_by_major_zip(
     scope_label: str = "5-Year View",
     contact_df: Optional[pd.DataFrame] = None,
     report_window: str = "all",
+    include_major_distribution_chart: bool = True,
 ) -> bytes:
     output = BytesIO()
     with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -863,6 +879,7 @@ def build_reports_by_major_zip(
                 selected_majors=[major],
                 contact_df=contact_df,
                 report_window=report_window,
+                include_major_distribution_chart=include_major_distribution_chart,
             )
             safe_major = re.sub(r"[^A-Za-z0-9_-]+", "_", major).strip("_") or "Major"
             zf.writestr(f"{safe_major}_Employer_Recruiting_Report.xlsx", report_bytes)
