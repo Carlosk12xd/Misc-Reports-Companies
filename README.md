@@ -32,7 +32,6 @@ Every generated workbook uses this structure:
 - A `.zip` containing multiple major-specific Excel exports
 - Optional CRM/Handshake/contact export for company contact enrichment
 
-<<<<<<< HEAD
 ## Deploy on Streamlit Cloud
 
 Repo root should contain:
@@ -67,5 +66,3 @@ The sidebar includes a **Reporting period** selector:
 - **Past year only** filters to the past 12 months based on the Start Date / hire date column and labels the workbook as a past-year report by default. If no usable date column exists, the app falls back to the latest Class Year.
 
 The selected label is written into the generated Excel workbook title and summary sheet, so directors can immediately tell whether they are reviewing the 5-year employer view or the past-year employer view.
-=======
->>>>>>> aee896325a224a8190d9ca2481b9ff1608649615
