@@ -6,6 +6,7 @@ import streamlit as st
 
 from report_builder import (
     build_report,
+    apply_reporting_period,
     build_reports_by_major_zip,
     clean_placement_data,
     detect_available_majors,
@@ -30,11 +31,23 @@ st.caption(
 with st.sidebar:
     st.header("Report Settings")
     report_title = st.text_input("Combined report title", "Employer Recruiting Report")
-    scope_label = st.text_input("Scope label", "5-Year View")
-    output_name = st.text_input("Combined report file name", "Employer_Recruiting_Report.xlsx")
+    report_period_choice = st.radio(
+        "Reporting period",
+        ["5-Year / all uploaded data", "Past year only"],
+        index=0,
+        help=(
+            "Use the full uploaded file for the 5-year report, or filter to the most recent one-year "
+            "period found in the Start Date / hire date column. If no date is available, the app uses the latest Class Year."
+        ),
+    )
+    report_window = "past_year" if report_period_choice == "Past year only" else "all"
+    default_scope_label = "Past Year View" if report_window == "past_year" else "5-Year View"
+    scope_label = st.text_input("Scope label shown in Excel", default_scope_label)
+    default_output_name = "Employer_Recruiting_Report_Past_Year.xlsx" if report_window == "past_year" else "Employer_Recruiting_Report_5_Years.xlsx"
+    output_name = st.text_input("Combined report file name", default_output_name)
     st.divider()
     st.markdown("**Template behavior**")
-    st.write("Each generated major report uses the exact same structure as the uploaded IS/MISM 5-year report:")
+    st.write("Each generated major report uses the exact same structure as the uploaded IS/MISM 5-year report, with the label updated for 5-year or past-year scope:")
     st.write("Executive Dashboard, Company Targets, Summary Tables, Placement Detail")
     st.divider()
     st.write("Optional: upload a CRM/Handshake/contact export to append employer contact fields to Company Targets.")
@@ -121,10 +134,15 @@ try:
         selected_majors=selected_majors if selected_majors else None,
         default_major=None if detected_majors else default_major,
     )
-    p1, p2, p3 = st.columns(3)
+    preview_clean, period_metadata = apply_reporting_period(preview_clean, report_window=report_window)
+    p1, p2, p3, p4 = st.columns(4)
     p1.metric("Rows after filtering", f"{len(preview_clean):,}")
     p2.metric("Detected companies", f"{preview_clean['Company'].nunique():,}")
     p3.metric("Majors/programs", f"{preview_clean['Major'].nunique():,}")
+    period_text = "All rows" if report_window == "all" else f"{period_metadata.get('Period Start', '')} to {period_metadata.get('Period End', '')}"
+    p4.metric("Report period", period_text)
+    if report_window == "past_year":
+        st.caption(f"Past-year filter method: {period_metadata.get('Filter Method', 'Unknown')}.")
 except Exception as exc:
     st.warning(f"Preview could not be cleaned yet: {exc}")
     preview_clean = None
@@ -143,19 +161,21 @@ if st.button("Generate report", type="primary"):
                 selected_majors=selected_majors if selected_majors else None,
                 contact_df=contact_df,
                 default_major=None if detected_majors else default_major,
+                report_window=report_window,
             )
         except Exception as exc:
             st.error(str(exc))
             st.stop()
 
         st.success("Combined report generated successfully.")
-        c1, c2, c3, c4, c5, c6 = st.columns(6)
+        c1, c2, c3, c4, c5, c6, c7 = st.columns(7)
         c1.metric("Placements", f"{int(metrics['Placements']):,}")
         c2.metric("Companies", f"{int(metrics['Unique Companies']):,}")
         c3.metric("Majors", f"{int(metrics['Majors / Programs']):,}")
         c4.metric("Top Major", str(metrics["Top Major"]))
         c5.metric("Tier 1", f"{int(metrics['Tier 1 Employers']):,}")
         c6.metric("Tier 2", f"{int(metrics['Tier 2 Employers']):,}")
+        c7.metric("Scope", scope_label)
 
         left, right = st.columns([2, 1])
         with left:
@@ -184,6 +204,7 @@ if st.button("Generate report", type="primary"):
                 report_title_prefix=report_title,
                 scope_label=scope_label,
                 contact_df=contact_df,
+                report_window=report_window,
             )
         except Exception as exc:
             st.error(f"Could not generate reports by major: {exc}")
@@ -192,7 +213,7 @@ if st.button("Generate report", type="primary"):
         st.download_button(
             label="Download separate reports by major ZIP",
             data=zip_bytes,
-            file_name="Employer_Recruiting_Reports_By_Major.zip",
+            file_name=("Employer_Recruiting_Reports_By_Major_Past_Year.zip" if report_window == "past_year" else "Employer_Recruiting_Reports_By_Major_5_Years.zip"),
             mime="application/zip",
         )
 

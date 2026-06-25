@@ -332,6 +332,69 @@ def clean_placement_data(
     return cleaned[PLACEMENT_DETAIL_COLUMNS].reset_index(drop=True), mapping, missing
 
 
+
+def apply_reporting_period(cleaned: pd.DataFrame, report_window: str = "all") -> Tuple[pd.DataFrame, Dict[str, object]]:
+    """Filter cleaned placement rows to the selected reporting window.
+
+    report_window options:
+    - "all": use every uploaded row, normally used for the 5-year report.
+    - "past_year": use the most recent one-year period available in the data.
+
+    The past-year filter uses Start Date when available and anchors the window to
+    today's date. If there are no usable dates, it falls back to the latest Class Year.
+    Rows without a date are excluded from the past-year date filter because the app
+    cannot prove they belong in the last year.
+    """
+    window = (report_window or "all").strip().lower().replace("-", "_").replace(" ", "_")
+    metadata: Dict[str, object] = {
+        "Report Window": "Past Year" if window in {"past_year", "past_year_only", "one_year"} else "All Uploaded Data",
+        "Filter Method": "None",
+        "Period Start": "",
+        "Period End": "",
+        "Rows Before Period Filter": int(len(cleaned)),
+        "Rows After Period Filter": int(len(cleaned)),
+    }
+    if window not in {"past_year", "past_year_only", "one_year"}:
+        return cleaned.reset_index(drop=True), metadata
+
+    out = cleaned.copy()
+    dates = pd.to_datetime(out.get("Start Date"), errors="coerce") if "Start Date" in out.columns else pd.Series(pd.NaT, index=out.index)
+    valid_dates = dates.dropna()
+    if not valid_dates.empty:
+        period_end = pd.Timestamp.today().normalize()
+        period_start = period_end - pd.DateOffset(years=1) + pd.DateOffset(days=1)
+        mask = dates.ge(period_start) & dates.le(period_end)
+        filtered = out.loc[mask].copy()
+        metadata.update({
+            "Filter Method": "Start Date / hire date anchored to today",
+            "Period Start": period_start.date().isoformat(),
+            "Period End": period_end.date().isoformat(),
+            "Rows After Period Filter": int(len(filtered)),
+        })
+        return filtered.reset_index(drop=True), metadata
+
+    # Fallback for exports that only have a class/graduation year.
+    if "Class Year" in out.columns:
+        class_years = pd.to_numeric(out["Class Year"].astype(str).str.extract(r"(\d{4})", expand=False), errors="coerce")
+        if class_years.notna().any():
+            latest_year = int(class_years.max())
+            filtered = out.loc[class_years == latest_year].copy()
+            metadata.update({
+                "Filter Method": "Latest Class Year fallback",
+                "Period Start": str(latest_year),
+                "Period End": str(latest_year),
+                "Rows After Period Filter": int(len(filtered)),
+            })
+            return filtered.reset_index(drop=True), metadata
+
+    # Last-resort behavior: keep all rows but disclose that no date/year field existed.
+    metadata.update({
+        "Filter Method": "No usable Start Date or Class Year found; all rows retained",
+        "Rows After Period Filter": int(len(out)),
+    })
+    return out.reset_index(drop=True), metadata
+
+
 def tier_thresholds(total_placements: int) -> Tuple[int, int]:
     tier1 = max(3, round(total_placements * 0.0125))
     tier2 = max(2, round(total_placements * 0.0050))
@@ -676,7 +739,7 @@ def write_report_workbook(
                     targets_ws.write(r, c, value, fmt_text)
         if len(company_targets) > 0:
             targets_ws.add_table(0, 0, len(company_targets), len(company_targets.columns) - 1, {
-                "name": "CompanyTargets5Year",
+                "name": "CompanyTargets",
                 "columns": [{"header": col} for col in company_targets.columns],
                 "style": "Table Style Medium 2",
             })
@@ -738,7 +801,7 @@ def write_report_workbook(
                     detail_ws.write(r, c, value, fmt_text)
         if len(cleaned) > 0:
             detail_ws.add_table(0, 0, len(cleaned), len(cleaned.columns) - 1, {
-                "name": "PlacementDetail5Year",
+                "name": "PlacementDetail",
                 "columns": [{"header": col} for col in cleaned.columns],
                 "style": "Table Style Medium 2",
             })
@@ -755,12 +818,14 @@ def write_report_workbook(
 def build_report(
     placement_df: pd.DataFrame,
     report_title: str = "Employer Recruiting Report",
-    scope_label: str = "Year View",
+    scope_label: str = "5-Year View",
     selected_majors: Optional[List[str]] = None,
     contact_df: Optional[pd.DataFrame] = None,
     default_major: Optional[str] = None,
+    report_window: str = "all",
 ) -> Tuple[bytes, Dict[str, object], pd.DataFrame, pd.DataFrame]:
     cleaned, _, _ = clean_placement_data(placement_df, selected_majors=selected_majors, default_major=default_major)
+    cleaned, period_metadata = apply_reporting_period(cleaned, report_window=report_window)
     company_targets, majors = make_company_targets(cleaned)
     company_targets = enrich_with_contacts(company_targets, contact_df)
     summary = make_summary_tables(cleaned, company_targets, majors)
@@ -774,6 +839,7 @@ def build_report(
         "Top Major Placements": int(major_counts.iloc[0]) if not major_counts.empty else 0,
         "Tier 1 Employers": int((company_targets["Employer Tier"] == "Tier 1 — Core employer").sum()) if not company_targets.empty else 0,
         "Tier 2 Employers": int((company_targets["Employer Tier"] == "Tier 2 — Relationship employer").sum()) if not company_targets.empty else 0,
+        **period_metadata,
     }
     report_bytes = write_report_workbook(cleaned, company_targets, summary, majors, metrics, report_title, scope_label)
     return report_bytes, metrics, company_targets, cleaned
@@ -783,8 +849,9 @@ def build_reports_by_major_zip(
     placement_df: pd.DataFrame,
     majors: List[str],
     report_title_prefix: str = "Employer Recruiting Report",
-    scope_label: str = "Year View",
+    scope_label: str = "5-Year View",
     contact_df: Optional[pd.DataFrame] = None,
+    report_window: str = "all",
 ) -> bytes:
     output = BytesIO()
     with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -795,6 +862,7 @@ def build_reports_by_major_zip(
                 scope_label=scope_label,
                 selected_majors=[major],
                 contact_df=contact_df,
+                report_window=report_window,
             )
             safe_major = re.sub(r"[^A-Za-z0-9_-]+", "_", major).strip("_") or "Major"
             zf.writestr(f"{safe_major}_Employer_Recruiting_Report.xlsx", report_bytes)

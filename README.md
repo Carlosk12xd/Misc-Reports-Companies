@@ -56,3 +56,13 @@ app.py
 pip install -r requirements.txt
 streamlit run app.py
 ```
+
+
+## Reporting period option
+
+The sidebar includes a **Reporting period** selector:
+
+- **5-Year / all uploaded data** keeps every uploaded placement row and labels the workbook as a 5-year report by default.
+- **Past year only** filters to the past 12 months based on the Start Date / hire date column and labels the workbook as a past-year report by default. If no usable date column exists, the app falls back to the latest Class Year.
+
+The selected label is written into the generated Excel workbook title and summary sheet, so directors can immediately tell whether they are reviewing the 5-year employer view or the past-year employer view.
