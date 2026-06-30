@@ -333,66 +333,76 @@ def clean_placement_data(
 
 
 
-def apply_reporting_period(cleaned: pd.DataFrame, report_window: str = "all") -> Tuple[pd.DataFrame, Dict[str, object]]:
-    """Filter cleaned placement rows to the selected reporting window.
+def class_year_values(anchor_class_year: int = 2026, year_count: int = 5) -> List[int]:
+    """Return the class years included in a report, newest to oldest."""
+    try:
+        anchor = int(anchor_class_year)
+    except Exception:
+        anchor = 2026
+    try:
+        count = max(1, int(year_count))
+    except Exception:
+        count = 5
+    return [anchor - offset for offset in range(count)]
+
+
+def extract_class_year_series(values: pd.Series) -> pd.Series:
+    """Extract a four-digit class year from values such as 2026, 2026.0, or Class of 2026."""
+    extracted = values.astype(str).str.extract(r"((?:19|20)\d{2})", expand=False)
+    return pd.to_numeric(extracted, errors="coerce")
+
+
+def apply_reporting_period(
+    cleaned: pd.DataFrame,
+    report_window: str = "all",
+    anchor_class_year: int = 2026,
+    five_year_count: int = 5,
+) -> Tuple[pd.DataFrame, Dict[str, object]]:
+    """Filter cleaned placement rows by Class Year / Class Of.
 
     report_window options:
-    - "all": use every uploaded row, normally used for the 5-year report.
-    - "past_year": use the most recent one-year period available in the data.
+    - "past_year": include only the anchor class year, for example Class of 2026.
+    - "all" / "five_year": include the anchor class year and the previous N class years,
+      for example Class of 2026, 2025, 2024, 2023, and 2022.
 
-    The past-year filter uses Start Date when available and anchors the window to
-    today's date. If there are no usable dates, it falls back to the latest Class Year.
-    Rows without a date are excluded from the past-year date filter because the app
-    cannot prove they belong in the last year.
+    This function intentionally does not use Start Date / hire date. The business rule for
+    these reports is based on graduation class year.
     """
     window = (report_window or "all").strip().lower().replace("-", "_").replace(" ", "_")
+    is_past_year = window in {"past_year", "past_year_only", "one_year", "one_year_only", "class_year"}
+    years_to_include = [int(anchor_class_year)] if is_past_year else class_year_values(anchor_class_year, five_year_count)
+    years_set = set(years_to_include)
+    class_year_label = ", ".join(str(y) for y in years_to_include)
+
     metadata: Dict[str, object] = {
-        "Report Window": "Past Year" if window in {"past_year", "past_year_only", "one_year"} else "All Uploaded Data",
-        "Filter Method": "None",
-        "Period Start": "",
-        "Period End": "",
+        "Report Window": "Past Year by Class Year" if is_past_year else f"{len(years_to_include)}-Year by Class Year",
+        "Filter Method": "Class Year / Class Of",
+        "Period Start": str(min(years_to_include)),
+        "Period End": str(max(years_to_include)),
+        "Class Years Included": class_year_label,
         "Rows Before Period Filter": int(len(cleaned)),
         "Rows After Period Filter": int(len(cleaned)),
     }
-    if window not in {"past_year", "past_year_only", "one_year"}:
-        return cleaned.reset_index(drop=True), metadata
 
     out = cleaned.copy()
-    dates = pd.to_datetime(out.get("Start Date"), errors="coerce") if "Start Date" in out.columns else pd.Series(pd.NaT, index=out.index)
-    valid_dates = dates.dropna()
-    if not valid_dates.empty:
-        period_end = pd.Timestamp.today().normalize()
-        period_start = period_end - pd.DateOffset(years=1) + pd.DateOffset(days=1)
-        mask = dates.ge(period_start) & dates.le(period_end)
-        filtered = out.loc[mask].copy()
+    if "Class Year" not in out.columns:
         metadata.update({
-            "Filter Method": "Start Date / hire date anchored to today",
-            "Period Start": period_start.date().isoformat(),
-            "Period End": period_end.date().isoformat(),
-            "Rows After Period Filter": int(len(filtered)),
+            "Filter Method": "No Class Year / Class Of column found; all rows retained",
+            "Rows After Period Filter": int(len(out)),
         })
-        return filtered.reset_index(drop=True), metadata
+        return out.reset_index(drop=True), metadata
 
-    # Fallback for exports that only have a class/graduation year.
-    if "Class Year" in out.columns:
-        class_years = pd.to_numeric(out["Class Year"].astype(str).str.extract(r"(\d{4})", expand=False), errors="coerce")
-        if class_years.notna().any():
-            latest_year = int(class_years.max())
-            filtered = out.loc[class_years == latest_year].copy()
-            metadata.update({
-                "Filter Method": "Latest Class Year fallback",
-                "Period Start": str(latest_year),
-                "Period End": str(latest_year),
-                "Rows After Period Filter": int(len(filtered)),
-            })
-            return filtered.reset_index(drop=True), metadata
+    class_years = extract_class_year_series(out["Class Year"])
+    if not class_years.notna().any():
+        metadata.update({
+            "Filter Method": "Class Year / Class Of column found, but no usable four-digit years; all rows retained",
+            "Rows After Period Filter": int(len(out)),
+        })
+        return out.reset_index(drop=True), metadata
 
-    # Last-resort behavior: keep all rows but disclose that no date/year field existed.
-    metadata.update({
-        "Filter Method": "No usable Start Date or Class Year found; all rows retained",
-        "Rows After Period Filter": int(len(out)),
-    })
-    return out.reset_index(drop=True), metadata
+    filtered = out.loc[class_years.isin(years_set)].copy()
+    metadata["Rows After Period Filter"] = int(len(filtered))
+    return filtered.reset_index(drop=True), metadata
 
 
 def tier_thresholds(total_placements: int) -> Tuple[int, int]:
@@ -829,9 +839,16 @@ def build_report(
     default_major: Optional[str] = None,
     report_window: str = "all",
     include_major_distribution_chart: bool = True,
+    anchor_class_year: int = 2026,
+    five_year_count: int = 5,
 ) -> Tuple[bytes, Dict[str, object], pd.DataFrame, pd.DataFrame]:
     cleaned, _, _ = clean_placement_data(placement_df, selected_majors=selected_majors, default_major=default_major)
-    cleaned, period_metadata = apply_reporting_period(cleaned, report_window=report_window)
+    cleaned, period_metadata = apply_reporting_period(
+        cleaned,
+        report_window=report_window,
+        anchor_class_year=anchor_class_year,
+        five_year_count=five_year_count,
+    )
     company_targets, majors = make_company_targets(cleaned)
     company_targets = enrich_with_contacts(company_targets, contact_df)
     summary = make_summary_tables(cleaned, company_targets, majors)
@@ -868,6 +885,8 @@ def build_reports_by_major_zip(
     contact_df: Optional[pd.DataFrame] = None,
     report_window: str = "all",
     include_major_distribution_chart: bool = True,
+    anchor_class_year: int = 2026,
+    five_year_count: int = 5,
 ) -> bytes:
     output = BytesIO()
     with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -880,6 +899,8 @@ def build_reports_by_major_zip(
                 contact_df=contact_df,
                 report_window=report_window,
                 include_major_distribution_chart=include_major_distribution_chart,
+                anchor_class_year=anchor_class_year,
+                five_year_count=five_year_count,
             )
             safe_major = re.sub(r"[^A-Za-z0-9_-]+", "_", major).strip("_") or "Major"
             zf.writestr(f"{safe_major}_Employer_Recruiting_Report.xlsx", report_bytes)

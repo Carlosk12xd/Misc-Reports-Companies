@@ -23,7 +23,7 @@ st.set_page_config(
 )
 
 st.title("Major Company Recruiting Report Builder")
-st.caption("Version: Major graph toggle — 2026-06-25")
+st.caption("Version: Class Year filter — 2026-06-30")
 st.caption(
     "Upload one placement Excel file or a ZIP of major-specific Excel exports. "
     "The app generates the same four-sheet Excel format as the IS/MISM 5-year company report for every major."
@@ -31,18 +31,42 @@ st.caption(
 
 with st.sidebar:
     st.header("1. Report Period")
+    current_class_year = int(st.number_input(
+        "Current class year",
+        min_value=2000,
+        max_value=2100,
+        value=2026,
+        step=1,
+        help="The 1-year report uses this class year. The 5-year report uses this class year plus the previous four class years.",
+        key="current_class_year",
+    ))
+    five_year_count = int(st.number_input(
+        "Number of class years in 5-year report",
+        min_value=1,
+        max_value=10,
+        value=5,
+        step=1,
+        help="Default is 5: Class of 2026, 2025, 2024, 2023, and 2022.",
+        key="five_year_count",
+    ))
+    five_years = [current_class_year - i for i in range(five_year_count)]
+    five_year_range_label = f"Class of {five_years[0]}–{five_years[-1]}" if len(five_years) > 1 else f"Class of {five_years[0]}"
     report_period_choice = st.radio(
-        "Choose the data window",
-        ["5-Year / all uploaded data", "Past year only"],
+        "Choose the class-year window",
+        [f"5-Year report ({five_year_range_label})", f"Past year report (Class of {current_class_year})"],
         index=0,
         help=(
-            "Use all uploaded rows for a 5-year report, or filter to the most recent one-year "
-            "period based on Start Date / hire date. If no date is available, the app uses the latest Class Year."
+            "This app filters by Class Year / Class Of, not Start Date. "
+            "Past year = current class year only. 5-year = current class year plus previous class years."
         ),
         key="report_period_choice_sidebar",
     )
-    report_window = "past_year" if report_period_choice == "Past year only" else "all"
-    default_scope_label = "Past Year View" if report_window == "past_year" else "5-Year View"
+    report_window = "past_year" if report_period_choice.startswith("Past year") else "all"
+    default_scope_label = (
+        f"Past Year View — Class of {current_class_year}"
+        if report_window == "past_year"
+        else f"5-Year View — {five_year_range_label}"
+    )
     st.success(f"Current selection: {default_scope_label}")
 
     st.header("2. Dashboard Options")
@@ -59,18 +83,24 @@ with st.sidebar:
     st.header("3. Report Settings")
     report_title = st.text_input("Combined report title", "Employer Recruiting Report")
     scope_label = st.text_input("Scope label shown in Excel", default_scope_label)
-    default_output_name = "Employer_Recruiting_Report_Past_Year.xlsx" if report_window == "past_year" else "Employer_Recruiting_Report_5_Years.xlsx"
+    default_output_name = (
+        f"Employer_Recruiting_Report_Class_of_{current_class_year}.xlsx"
+        if report_window == "past_year"
+        else f"Employer_Recruiting_Report_Class_of_{five_years[0]}_{five_years[-1]}.xlsx"
+    )
     output_name = st.text_input("Combined report file name", default_output_name)
     st.divider()
     st.markdown("**Template behavior**")
-    st.write("Each generated major report uses the exact same structure as the uploaded IS/MISM 5-year report, with the label updated for 5-year or past-year scope:")
+    st.write("Each generated major report uses the exact same structure as the uploaded IS/MISM 5-year report, with the label updated for 5-year or past-year class-year scope:")
     st.write("Executive Dashboard, Company Targets, Summary Tables, Placement Detail")
     st.divider()
     st.write("Optional: upload a CRM/Handshake/contact export to append employer contact fields to Company Targets.")
 
+active_class_years = [current_class_year] if report_window == "past_year" else five_years
+active_class_years_text = ", ".join(str(y) for y in active_class_years)
 st.info(
     f"Active report period: **{scope_label}**. "
-    + ("The generated Excel report will use all uploaded rows." if report_window == "all" else "The generated Excel report will filter to the most recent 12 months before building tables and charts.")
+    f"The generated Excel report will filter by Class Year / Class Of: **{active_class_years_text}**."
 )
 
 placement_file = st.file_uploader("Upload placement Excel file or ZIP folder export", type=["xlsx", "xls", "zip"])
@@ -79,7 +109,7 @@ contact_file = st.file_uploader("Optional contact / Handshake / CRM file", type=
 if not placement_file:
     st.info(
         "Upload a placement workbook or a ZIP like the Master Report folder. Required fields: Company/Employer and Major/Program. "
-        "Recommended fields: Job Title, Job Role, Functional Area, Industry, Start Date, State, Class Year, Company ID, Job Offer ID, Record ID."
+        "Recommended fields: Job Title, Job Role, Functional Area, Industry, State, Class Year / Class Of, Start Date, Company ID, Job Offer ID, Record ID."
     )
     st.stop()
 
@@ -155,15 +185,19 @@ try:
         selected_majors=selected_majors if selected_majors else None,
         default_major=None if detected_majors else default_major,
     )
-    preview_clean, period_metadata = apply_reporting_period(preview_clean, report_window=report_window)
+    preview_clean, period_metadata = apply_reporting_period(
+        preview_clean,
+        report_window=report_window,
+        anchor_class_year=current_class_year,
+        five_year_count=five_year_count,
+    )
     p1, p2, p3, p4 = st.columns(4)
     p1.metric("Rows after filtering", f"{len(preview_clean):,}")
     p2.metric("Detected companies", f"{preview_clean['Company'].nunique():,}")
     p3.metric("Majors/programs", f"{preview_clean['Major'].nunique():,}")
-    period_text = "All rows" if report_window == "all" else f"{period_metadata.get('Period Start', '')} to {period_metadata.get('Period End', '')}"
-    p4.metric("Report period", period_text)
-    if report_window == "past_year":
-        st.caption(f"Past-year filter method: {period_metadata.get('Filter Method', 'Unknown')}.")
+    period_text = period_metadata.get("Class Years Included", active_class_years_text)
+    p4.metric("Class years", period_text)
+    st.caption(f"Class-year filter method: {period_metadata.get('Filter Method', 'Unknown')}.")
     if not include_major_distribution_chart:
         st.caption("Major distribution graph will be skipped in the Excel dashboard.")
 except Exception as exc:
@@ -186,6 +220,8 @@ if st.button("Generate report", type="primary"):
                 default_major=None if detected_majors else default_major,
                 report_window=report_window,
                 include_major_distribution_chart=include_major_distribution_chart,
+                anchor_class_year=current_class_year,
+                five_year_count=five_year_count,
             )
         except Exception as exc:
             st.error(str(exc))
@@ -230,6 +266,8 @@ if st.button("Generate report", type="primary"):
                 contact_df=contact_df,
                 report_window=report_window,
                 include_major_distribution_chart=include_major_distribution_chart,
+                anchor_class_year=current_class_year,
+                five_year_count=five_year_count,
             )
         except Exception as exc:
             st.error(f"Could not generate reports by major: {exc}")
@@ -238,7 +276,11 @@ if st.button("Generate report", type="primary"):
         st.download_button(
             label="Download separate reports by major ZIP",
             data=zip_bytes,
-            file_name=("Employer_Recruiting_Reports_By_Major_Past_Year.zip" if report_window == "past_year" else "Employer_Recruiting_Reports_By_Major_5_Years.zip"),
+            file_name=(
+                f"Employer_Recruiting_Reports_By_Major_Class_of_{current_class_year}.zip"
+                if report_window == "past_year"
+                else f"Employer_Recruiting_Reports_By_Major_Class_of_{five_years[0]}_{five_years[-1]}.zip"
+            ),
             mime="application/zip",
         )
 

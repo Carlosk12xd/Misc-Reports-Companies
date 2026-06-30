@@ -58,14 +58,19 @@ streamlit run app.py
 ```
 
 
-## Reporting period option
+## Reporting period / class year option
 
-The sidebar includes a **Reporting period** selector:
+The sidebar includes a **Report Period** section that filters by **Class Year / Class Of** rather than Start Date.
 
-- **5-Year / all uploaded data** keeps every uploaded placement row and labels the workbook as a 5-year report by default.
-- **Past year only** filters to the past 12 months based on the Start Date / hire date column and labels the workbook as a past-year report by default. If no usable date column exists, the app falls back to the latest Class Year.
+Default settings:
 
-The selected label is written into the generated Excel workbook title and summary sheet, so directors can immediately tell whether they are reviewing the 5-year employer view or the past-year employer view.
+- **Current class year:** `2026`
+- **Past year report:** includes only `Class of 2026`
+- **5-year report:** includes `Class of 2026, 2025, 2024, 2023, and 2022`
+
+You can change the current class year in the sidebar later. For example, changing it to `2027` makes the past-year report use `Class of 2027` and the 5-year report use `2027–2023`.
+
+The selected label is written into the generated Excel workbook title, dashboard, summary areas, and default download filenames, so directors can immediately tell whether they are reviewing the 5-year employer view or the past-year employer view.
 
 
 ## Major distribution graph option
